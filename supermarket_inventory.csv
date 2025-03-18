@@ -1,0 +1,41 @@
+Product Name,Category,MRP (INR),Discounted Price (INR),Quantity Available,Location in Store,Veg/Non-Veg
+Basmati Rice - Brand A,Rice,120,110,100,Aisle 1,Veg
+Basmati Rice - Brand B,Rice,130,120,90,Aisle 1,Veg
+Basmati Rice - Brand C,Rice,110,100,110,Aisle 1,Veg
+Basmati Rice - Brand D,Rice,125,115,85,Aisle 1,Veg
+Basmati Rice - Brand E,Rice,135,125,95,Aisle 1,Veg
+Basmati Rice - Brand F,Rice,140,130,80,Aisle 1,Veg
+Basmati Rice - Brand G,Rice,115,105,120,Aisle 1,Veg
+Basmati Rice - Brand H,Rice,125,115,105,Aisle 1,Veg
+Basmati Rice - Brand I,Rice,130,120,100,Aisle 1,Veg
+Basmati Rice - Brand J,Rice,120,110,110,Aisle 1,Veg
+Toor Dal - Brand A,Dal,180,170,80,Aisle 2,Veg
+Toor Dal - Brand B,Dal,190,180,85,Aisle 2,Veg
+Toor Dal - Brand C,Dal,175,165,75,Aisle 2,Veg
+Toor Dal - Brand D,Dal,185,175,90,Aisle 2,Veg
+Toor Dal - Brand E,Dal,195,185,95,Aisle 2,Veg
+Toor Dal - Brand F,Dal,200,190,70,Aisle 2,Veg
+Toor Dal - Brand G,Dal,170,160,100,Aisle 2,Veg
+Toor Dal - Brand H,Dal,180,170,80,Aisle 2,Veg
+Toor Dal - Brand I,Dal,190,180,85,Aisle 2,Veg
+Toor Dal - Brand J,Dal,185,175,90,Aisle 2,Veg
+Wheat Flour,Grocery,50,45,500,Aisle 3,Veg
+Sugar,Grocery,45,40,300,Aisle 3,Veg
+Salt,Grocery,20,18,200,Aisle 3,Veg
+Milk,Dairy,60,55,250,Aisle 4,Non-Veg
+Eggs,Dairy,80,70,150,Aisle 4,Non-Veg
+Chicken,Meat,250,230,50,Aisle 5,Veg
+Fish,Meat,300,280,40,Aisle 5,Veg
+Vegetable Oil,Grocery,180,170,100,Aisle 3,Veg
+Potato,Vegetables,25,22,600,Aisle 6,Veg
+Onion,Vegetables,30,28,500,Aisle 6,Veg
+Tomato,Vegetables,35,32,450,Aisle 6,Veg
+Apple,Fruits,150,140,200,Aisle 7,Veg
+Banana,Fruits,50,45,350,Aisle 7,Veg
+Shampoo,Personal Care,120,110,100,Aisle 8,Veg
+Soap,Personal Care,40,35,250,Aisle 8,Veg
+Toothpaste,Personal Care,90,80,180,Aisle 8,Veg
+Detergent Powder,Personal Care,200,190,90,Aisle 8,Veg
+Tea,Beverages,250,240,60,Aisle 9,Veg
+Coffee,Beverages,50,45,400,Aisle 9,Veg
+Biscuits,Snacks,30,25,700,Aisle 10,Veg
