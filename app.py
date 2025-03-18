@@ -16,7 +16,9 @@ from PIL import Image
 import requests
 from deep_translator import GoogleTranslator
 import pandas as pd
-
+import pyaudio
+import wave
+import speech_recognition as sr
 # Initialize translator
 translator = GoogleTranslator(source='auto', target='en')
 
@@ -213,20 +215,99 @@ if uploaded_file:
         # Set up RAG chain
         st.session_state.chain = setup_rag_chain(documents)
 
-# User input for query
-if language == "Hindi":
-    query = st.text_input("हिंदी में प्रश्न दर्ज करें:", "अंडे की कीमत क्या है?")
-elif language == "Odia":
-    query = st.text_input("ଓଡ଼ିଆରେ ପ୍ରଶ୍ନ ପ୍ରବେଶ କରନ୍ତୁ:", "ଅଣ୍ଡାର ମୂଲ୍ୟ କେତେ?")
-elif language == "Bengali":
-    query = st.text_input("বাংলায় প্রশ্ন লিখুন:", "ডিমের দাম কত?")
-elif language == "Tamil":
-    query = st.text_input("தமிழில் கேள்வியை உள்ளிடவும்:", "முட்டையின் விலை என்ன?")
-else:
-    query = st.text_input("Enter your question:", "What is the price of eggs?")
+# Function to record audio
+def record_audio(filename="voice_input.wav", record_seconds=5, sample_rate=44100, chunk=1024):
+    """Records audio from the microphone and saves it as a WAV file."""
+    p = pyaudio.PyAudio()
+    
+    stream = p.open(format=pyaudio.paInt16,
+                    channels=1,
+                    rate=sample_rate,
+                    input=True,
+                    frames_per_buffer=chunk)
+    
+    frames = []
+    st.write("🎤 Recording... Please speak.")
 
+    for _ in range(0, int(sample_rate / chunk * record_seconds)):
+        data = stream.read(chunk)
+        frames.append(data)
+    
+    st.write("✅ Recording finished.")
+    
+    stream.stop_stream()
+    stream.close()
+    p.terminate()
+    
+    # Save the recorded audio
+    with wave.open(filename, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(p.get_sample_size(pyaudio.paInt16))
+        wf.setframerate(sample_rate)
+        wf.writeframes(b"".join(frames))
+    
+    return filename
+
+# Function to transcribe the recorded audio
+def transcribe_audio(filename, lang="en"):
+    """Converts speech from the audio file to text in the selected language."""
+    recognizer = sr.Recognizer()
+    with sr.AudioFile(filename) as source:
+        audio = recognizer.record(source)
+        try:
+            return recognizer.recognize_google(audio, language=lang)  # Transcribes in the selected language
+        except sr.UnknownValueError:
+            st.error("Could not understand the audio.")
+        except sr.RequestError as e:
+            st.error(f"Could not request results; {e}")
+    return None
+
+# Detect input method
+input_method = st.radio("Select Input Method:", ("Text Input", "Voice Input"))
+
+query = ""
+
+if input_method == "Voice Input":
+    if st.button("🎤 Record Voice"):
+        audio_filename = record_audio()
+        lang_code = "en"  # Default English
+        
+        if language == "Hindi":
+            lang_code = "hi-IN"
+        elif language == "Odia":
+            lang_code = "or-IN"
+        elif language == "Bengali":
+            lang_code = "bn-IN"
+        elif language == "Tamil":
+            lang_code = "ta-IN"  # Tamil transcription
+
+        transcribed_text = transcribe_audio(audio_filename, lang=lang_code)
+        
+        if transcribed_text:
+            st.session_state.transcribed_query = transcribed_text  # Store transcribed text
+            st.write(f"**Transcribed Query:** {transcribed_text}")
+
+# Use transcribed query if voice input was used
+if input_method == "Voice Input" and "transcribed_query" in st.session_state:
+    query = st.session_state.transcribed_query
+else:
+    # Text input
+    if language == "Hindi":
+        query = st.text_input("हिंदी में प्रश्न दर्ज करें:")
+    elif language == "Odia":
+        query = st.text_input("ଓଡ଼ିଆରେ ପ୍ରଶ୍ନ ପ୍ରବେଶ କରନ୍ତୁ:")
+    elif language == "Bengali":
+        query = st.text_input("বাংলায় প্রশ্ন লিখুন:")
+    elif language == "Tamil":
+        query = st.text_input("தமிழில் கேள்வியை உள்ளிடவும்:")
+    else:
+        query = st.text_input("Enter your question:")
+
+# Process query when "Get Answer" is clicked
 if st.button("Get Answer"):
-    if st.session_state.chain:
+    if query.strip() == "":
+        st.error("Please enter or record a query before fetching an answer.")
+    elif st.session_state.chain:
         # Translate input to English
         if language == "Hindi":
             translated_query = translator.translate(query, src='hi', dest='en')
@@ -239,7 +320,7 @@ if st.button("Get Answer"):
         else:
             translated_query = query
 
-        # Invoke the chain
+        # Invoke the RAG chain with the query
         result = st.session_state.chain.invoke(translated_query)
 
         # Translate output back to the selected language
