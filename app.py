@@ -19,7 +19,6 @@ import pandas as pd
 import pyaudio
 import wave
 import speech_recognition as sr
-
 # Initialize translator
 translator = GoogleTranslator(source='auto', target='en')
 
