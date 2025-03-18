@@ -19,8 +19,10 @@ import pandas as pd
 import pyaudio
 import wave
 import speech_recognition as sr
-# Initialize translator
-translator = GoogleTranslator(source='auto', target='en')
+from gtts import gTTS
+import tempfile
+import base64
+import time
 
 # Streamlit App
 st.title("CartMapper")
@@ -31,6 +33,26 @@ if "chain" not in st.session_state:
 
 # Language selection
 language = st.radio("Select Language:", ("English", "Hindi", "Odia", "Bengali", "Tamil"))
+
+
+# Initialize translator with retry mechanism
+def get_translator(source='auto', target='en', max_retries=3):
+    """Initialize translator with retry mechanism"""
+    for attempt in range(max_retries):
+        try:
+            return GoogleTranslator(source=source, target=target)
+        except Exception as e:
+            if attempt < max_retries - 1:
+                st.warning(f"Translation service connection failed. Retrying ({attempt + 1}/{max_retries})...")
+                time.sleep(2)  # Wait before retrying
+            else:
+                st.error(
+                    f"Could not connect to translation service after {max_retries} attempts. Proceeding without translation.")
+                return None
+
+
+# Initialize translator
+translator = get_translator(source='auto', target='en')
 
 # File uploader for PDF and CSV
 uploaded_file = st.file_uploader("Upload a PDF or CSV file", type=["pdf", "csv"])
@@ -215,38 +237,40 @@ if uploaded_file:
         # Set up RAG chain
         st.session_state.chain = setup_rag_chain(documents)
 
+
 # Function to record audio
 def record_audio(filename="voice_input.wav", record_seconds=5, sample_rate=44100, chunk=1024):
     """Records audio from the microphone and saves it as a WAV file."""
     p = pyaudio.PyAudio()
-    
+
     stream = p.open(format=pyaudio.paInt16,
                     channels=1,
                     rate=sample_rate,
                     input=True,
                     frames_per_buffer=chunk)
-    
+
     frames = []
     st.write("🎤 Recording... Please speak.")
 
     for _ in range(0, int(sample_rate / chunk * record_seconds)):
         data = stream.read(chunk)
         frames.append(data)
-    
+
     st.write("✅ Recording finished.")
-    
+
     stream.stop_stream()
     stream.close()
     p.terminate()
-    
+
     # Save the recorded audio
     with wave.open(filename, "wb") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(p.get_sample_size(pyaudio.paInt16))
         wf.setframerate(sample_rate)
         wf.writeframes(b"".join(frames))
-    
+
     return filename
+
 
 # Function to transcribe the recorded audio
 def transcribe_audio(filename, lang="en"):
@@ -262,6 +286,81 @@ def transcribe_audio(filename, lang="en"):
             st.error(f"Could not request results; {e}")
     return None
 
+
+# Function to generate audio from text with fallback
+def text_to_speech(text, lang_code="en", max_retries=2):
+    """Converts text to speech in the specified language with fallback to English."""
+    for attempt in range(max_retries):
+        try:
+            # Try with the target language
+            tts = gTTS(text=text, lang=lang_code, slow=False)
+
+            # Create a temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
+                temp_filename = fp.name
+                tts.save(temp_filename)
+
+            # Read the audio file and encode it to base64
+            with open(temp_filename, "rb") as audio_file:
+                audio_bytes = audio_file.read()
+
+            # Clean up the temporary file
+            os.remove(temp_filename)
+
+            # Return the audio for playback
+            return audio_bytes, True
+        except Exception as e:
+            if lang_code != "en" and attempt == 0:
+                st.warning(f"Failed to generate speech in {lang_code}. Trying English as fallback...")
+                lang_code = "en"  # Try English as fallback
+            elif attempt == max_retries - 1:
+                st.error(f"Failed to generate speech: {e}")
+                return None, False
+    return None, False
+
+
+# Function to get language code for TTS
+def get_tts_language_code(language):
+    """Maps the selected language to its code for text-to-speech."""
+    language_codes = {
+        "English": "en",
+        "Hindi": "hi",
+        "Odia": "or",  # Note: gTTS might not support all languages equally
+        "Bengali": "bn",
+        "Tamil": "ta"
+    }
+    return language_codes.get(language, "en")
+
+
+# Safe translate function with fallback
+def safe_translate(text, source_lang, target_lang, max_retries=2):
+    """Safely translates text with retries and returns original text if translation fails."""
+    if source_lang == target_lang:
+        return text, True  # No translation needed
+
+    for attempt in range(max_retries):
+        try:
+            # Try to initialize a fresh translator for each attempt
+            temp_translator = GoogleTranslator(source=source_lang, target=target_lang)
+            translated = temp_translator.translate(text)
+            if translated:
+                return translated, True
+            else:
+                # If we get empty result but no exception
+                if attempt == max_retries - 1:
+                    st.warning(f"Translation returned empty result. Using original text.")
+                    return text, False
+        except Exception as e:
+            if attempt == max_retries - 1:
+                st.warning(f"Translation failed: {e}. Using original text.")
+                return text, False
+            else:
+                st.info(f"Translation attempt {attempt + 1} failed. Retrying...")
+                time.sleep(1)  # Wait before retry
+
+    return text, False  # Fallback to original text
+
+
 # Detect input method
 input_method = st.radio("Select Input Method:", ("Text Input", "Voice Input"))
 
@@ -271,7 +370,7 @@ if input_method == "Voice Input":
     if st.button("🎤 Record Voice"):
         audio_filename = record_audio()
         lang_code = "en"  # Default English
-        
+
         if language == "Hindi":
             lang_code = "hi-IN"
         elif language == "Odia":
@@ -282,7 +381,7 @@ if input_method == "Voice Input":
             lang_code = "ta-IN"  # Tamil transcription
 
         transcribed_text = transcribe_audio(audio_filename, lang=lang_code)
-        
+
         if transcribed_text:
             st.session_state.transcribed_query = transcribed_text  # Store transcribed text
             st.write(f"**Transcribed Query:** {transcribed_text}")
@@ -303,37 +402,88 @@ else:
     else:
         query = st.text_input("Enter your question:")
 
+# Output method selection
+output_method = st.radio("Select Output Method:", ("Text Only", "Text and Voice"))
+
 # Process query when "Get Answer" is clicked
 if st.button("Get Answer"):
     if query.strip() == "":
         st.error("Please enter or record a query before fetching an answer.")
     elif st.session_state.chain:
-        # Translate input to English
+        # Determine source language code based on selected language
+        src_lang = "en"
         if language == "Hindi":
-            translated_query = translator.translate(query, src='hi', dest='en')
+            src_lang = "hi"
         elif language == "Odia":
-            translated_query = translator.translate(query, src='or', dest='en')
+            src_lang = "or"
         elif language == "Bengali":
-            translated_query = translator.translate(query, src='bn', dest='en')
+            src_lang = "bn"
         elif language == "Tamil":
-            translated_query = translator.translate(query, src='ta', dest='en')
+            src_lang = "ta"
+
+        # Translate input to English if needed
+        if language != "English":
+            translated_query, translation_success = safe_translate(query, src_lang, "en")
+            if not translation_success:
+                st.warning("Query translation was not successful. Results might be less accurate.")
         else:
             translated_query = query
+            translation_success = True
+
+        # Show translated query only if it was actually translated
+        if language != "English":
+            st.write(f"**Translated Query (English):** {translated_query}")
 
         # Invoke the RAG chain with the query
-        result = st.session_state.chain.invoke(translated_query)
+        with st.spinner("Generating answer..."):
+            result = st.session_state.chain.invoke(translated_query)
 
-        # Translate output back to the selected language
-        if language == "Hindi":
-            result = translator.translate(result, src='en', dest='hi')
-        elif language == "Odia":
-            result = translator.translate(result, src='en', dest='or')
-        elif language == "Bengali":
-            result = translator.translate(result, src='en', dest='bn')
-        elif language == "Tamil":
-            result = translator.translate(result, src='en', dest='ta')
+        # Show raw result from RAG chain
+        if language != "English":
+            st.write(f"**Raw Result (English):** {result}")
 
+        # Translate output back to the selected language if needed
+        if language != "English":
+            translated_result, translation_success = safe_translate(result, "en", src_lang)
+            if not translation_success:
+                st.warning("Response translation was not successful. Showing English response.")
+                final_result = result
+            else:
+                final_result = translated_result
+                st.write(f"**Translated Result ({language}):** {translated_result}")
+        else:
+            final_result = result
+
+        # Display the final answer
         st.write("### Answer:")
-        st.write(result)
+        st.write(final_result)
+
+        # Generate voice output if selected
+        if output_method == "Text and Voice":
+            # Get the appropriate language code for TTS
+            tts_lang_code = get_tts_language_code(language)
+
+            with st.spinner("Generating voice output..."):
+                # Use the appropriate text for voice conversion
+                text_for_speech = final_result
+
+                # Generate audio from the text
+                audio_bytes, tts_success = text_to_speech(text_for_speech, lang_code=tts_lang_code)
+
+                if audio_bytes and tts_success:
+                    # Create audio player
+                    st.audio(audio_bytes, format="audio/mp3")
+
+                    # Also provide a download button for the audio
+                    b64 = base64.b64encode(audio_bytes).decode()
+                    href = f'<a href="data:audio/mp3;base64,{b64}" download="answer.mp3">Download audio response</a>'
+                    st.markdown(href, unsafe_allow_html=True)
+                elif not tts_success:
+                    st.error("Could not generate voice output. Please try again or use text-only mode.")
     else:
         st.error("No file has been processed yet. Please upload a PDF or CSV file or scan a QR code.")
+
+# Add offline mode toggle
+offline_mode = st.sidebar.checkbox("Offline Mode (Skip translations)")
+if offline_mode:
+    st.sidebar.info("Running in offline mode. No translation services will be used.")
