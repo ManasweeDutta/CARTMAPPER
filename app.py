@@ -15,6 +15,7 @@ from pyzbar.pyzbar import decode
 from PIL import Image
 import requests
 from deep_translator import GoogleTranslator
+import pandas as pd
 
 # Initialize translator
 translator = GoogleTranslator(source='auto', target='en')
@@ -29,11 +30,12 @@ if "chain" not in st.session_state:
 # Language selection
 language = st.radio("Select Language:", ("English", "Hindi", "Odia", "Bengali", "Tamil"))
 
-# File uploader for PDF
-uploaded_file = st.file_uploader("Upload a PDF file", type="pdf")
+# File uploader for PDF and CSV
+uploaded_file = st.file_uploader("Upload a PDF or CSV file", type=["pdf", "csv"])
 
 # Option to scan QR code from camera or upload an image
 qr_option = st.radio("QR Code Input Method:", ("Upload QR Image", "Scan QR from Camera"))
+
 
 def download_pdf_from_url(url):
     """Download a PDF from a URL and return its content as bytes."""
@@ -53,6 +55,7 @@ def download_pdf_from_url(url):
         st.error(f"An error occurred while downloading the PDF: {e}")
         return None
 
+
 def process_pdf(pdf_file):
     """Process a PDF file and return a list of documents."""
     try:
@@ -70,6 +73,26 @@ def process_pdf(pdf_file):
     except PyPDF2.errors.PdfReadError as e:
         st.error(f"Failed to process the PDF: {e}")
         return None
+
+
+def process_csv(csv_file):
+    """Process a CSV file and return a list of documents."""
+    try:
+        # Read the CSV file into a DataFrame
+        df = pd.read_csv(csv_file)
+
+        # Convert each row into a Document object
+        documents = []
+        for index, row in df.iterrows():
+            # Combine all columns into a single string
+            content = "\n".join([f"{col}: {row[col]}" for col in df.columns])
+            documents.append(Document(page_content=content))
+
+        return documents
+    except Exception as e:
+        st.error(f"Failed to process the CSV file: {e}")
+        return None
+
 
 def setup_rag_chain(documents):
     """Set up the RAG (Retrieval-Augmented Generation) chain."""
@@ -126,12 +149,13 @@ def setup_rag_chain(documents):
 
     # Define the chain
     chain = (
-        {"context": retriever, "question": RunnablePassthrough()}
-        | prompt
-        | llm
-        | StrOutputParser()
+            {"context": retriever, "question": RunnablePassthrough()}
+            | prompt
+            | llm
+            | StrOutputParser()
     )
     return chain
+
 
 # Process QR code based on the selected option
 if qr_option == "Upload QR Image":
@@ -173,10 +197,17 @@ else:
     elif qr_option == "Scan QR from Camera" and camera_image:
         st.error("No QR code found in the camera image.")
 
-# Process uploaded PDF
+# Process uploaded file (PDF or CSV)
 if uploaded_file:
-    # Process uploaded PDF
-    documents = process_pdf(uploaded_file)
+    if uploaded_file.type == "application/pdf":
+        # Process uploaded PDF
+        documents = process_pdf(uploaded_file)
+    elif uploaded_file.type == "text/csv":
+        # Process uploaded CSV
+        documents = process_csv(uploaded_file)
+    else:
+        st.error("Unsupported file type. Please upload a PDF or CSV file.")
+        documents = None
 
     if documents:  # Ensure documents were processed successfully
         # Set up RAG chain
@@ -224,4 +255,4 @@ if st.button("Get Answer"):
         st.write("### Answer:")
         st.write(result)
     else:
-        st.error("No PDF has been processed yet. Please scan a QR code or upload a PDF.")
+        st.error("No file has been processed yet. Please upload a PDF or CSV file or scan a QR code.")
