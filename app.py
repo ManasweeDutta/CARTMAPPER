@@ -145,7 +145,7 @@ def setup_rag_chain(documents):
     # Initialize LLM
     llm = ChatGroq(
         temperature=0,
-        model_name="mixtral-8x7b-32768",
+        model_name="mistral-saba-24b",
         groq_api_key=os.environ['GROQ_API_KEY']
     )
 
