@@ -1,7 +1,23 @@
 import os
+import os
 import io
-import PyPDF2
+import pathlib
+import math
+import random
+import time
+import json
+import tempfile
+import base64
+import numpy as np
+import pandas as pd
+import cv2
+import pyaudio
+import wave
+import speech_recognition as sr
+from gtts import gTTS
+from PIL import Image, ImageDraw, ImageFont
 import streamlit as st
+from deep_translator import GoogleTranslator
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
@@ -11,26 +27,105 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
-from pyzbar.pyzbar import decode
-from PIL import Image, ImageDraw, ImageFont
-import requests
-from deep_translator import GoogleTranslator
-import pandas as pd
-import pyaudio
-import wave
-import speech_recognition as sr
-from gtts import gTTS
-import tempfile
-import base64
-import time
-import json
-import numpy as np
-import math
-import random
 
-# Streamlit App Configuration
-st.set_page_config(page_title="CartMapper", layout="wide")
-st.title("CartMapper - Document Analysis & Indoor Navigation")
+# Google OAuth
+from google_auth_oauthlib.flow import Flow
+from google.oauth2 import id_token
+from google.auth.transport import requests
+
+os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1" 
+# ==================== GOOGLE AUTH CONFIG ====================
+
+CLIENT_SECRETS_FILE = os.path.join(pathlib.Path(__file__).parent, "client_secret.json")
+SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.profile", "https://www.googleapis.com/auth/userinfo.email"]
+REDIRECT_URI = "http://localhost:8501/"   # ⚠️ Change this if deploying
+
+def check_auth():
+    """Show login if user not authenticated"""
+    if "user" not in st.session_state:
+        st.title("🔐 CartMapper Login")
+
+        # Create OAuth flow
+        flow = Flow.from_client_secrets_file(
+            client_secrets_file=CLIENT_SECRETS_FILE,
+            scopes=SCOPES,
+            redirect_uri=REDIRECT_URI
+        )
+
+        auth_url, state = flow.authorization_url(prompt="consent")
+        st.session_state["oauth_state"] = state
+
+        # Google Login Button
+        st.markdown(f"[👉 Continue with Google]({auth_url})")
+
+        st.stop()
+    else:
+        # Already logged in
+        st.sidebar.success(f"✅ Logged in as {st.session_state['user']['email']}")
+        return True
+
+def handle_oauth_callback():
+    """Handle redirect from Google after login"""
+    query_params = st.query_params  # ✅ new API
+    if "code" in query_params:
+        try:
+            # Restore OAuth flow
+            flow = Flow.from_client_secrets_file(
+                client_secrets_file=CLIENT_SECRETS_FILE,
+                scopes=SCOPES,
+                redirect_uri=REDIRECT_URI,
+                state=st.session_state.get("oauth_state")
+            )
+
+            # ✅ Reconstruct full callback URL
+            # Example: http://localhost:8501/?code=xxx&state=yyy
+            current_url = REDIRECT_URI + "?" + "&".join([f"{k}={v}" for k, v in query_params.items()])
+
+            # Exchange auth code for tokens
+            flow.fetch_token(authorization_response=current_url)
+
+            # Verify ID token
+            creds = flow.credentials
+            user_info = id_token.verify_oauth2_token(
+                creds._id_token, requests.Request(), flow.client_config["client_id"]
+            )
+
+            # Save user info
+            st.session_state["user"] = {
+                "name": user_info.get("name", "Google User"),
+                "email": user_info.get("email", ""),
+                "picture": user_info.get("picture", "")
+            }
+
+            # ✅ Clear query params after login
+            st.query_params.clear()
+            st.rerun()
+
+        except Exception as e:
+            st.error(f"❌ Authentication failed: {e}")
+            st.stop()
+
+
+# ==================== STREAMLIT APP ====================
+
+# Page config
+st.set_page_config(page_title="CartMapper", layout="wide", page_icon="🛒")
+
+# Step 1: Handle OAuth first
+handle_oauth_callback()
+check_auth()
+
+# Step 2: Main app
+st.title("🛒 CartMapper")
+
+# Sidebar user info
+with st.sidebar:
+    st.image(st.session_state["user"]["picture"], width=60)
+    st.write(f"👋 Welcome, {st.session_state['user']['name']} ({st.session_state['user']['email']})")
+
+    if st.button("🚪 Sign Out"):
+        st.session_state.clear()
+        st.rerun()
 
 # Initialize session states
 if "chain" not in st.session_state:
@@ -44,15 +139,34 @@ if "current_location" not in st.session_state:
 if "destinations" not in st.session_state:
     st.session_state.destinations = {}
 
-# Sidebar for main feature selection
-feature_mode = st.sidebar.selectbox(
-    "Select Feature:",
-    ["Document Analysis", "Indoor Navigation", "Both Features"]
-)
 
-# Language selection (applies to both features)
-language = st.radio("Select Language:", ("English", "Hindi", "Odia", "Bengali", "Tamil"))
 
+# ==================== QR CODE FUNCTIONS WITH OPENCV ====================
+
+def decode_qr_code(image):
+    """Decode QR code using OpenCV instead of pyzbar"""
+    try:
+        # Convert PIL Image to OpenCV format
+        if isinstance(image, Image.Image):
+            image = np.array(image)
+            # Convert RGB to BGR (OpenCV uses BGR format)
+            if len(image.shape) == 3:
+                image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        
+        # Initialize QRCode detector
+        detector = cv2.QRCodeDetector()
+        
+        # Detect and decode QR code
+        data, vertices, _ = detector.detectAndDecode(image)
+        
+        if data:
+            return [type('obj', (object,), {'data': data.encode()})]  # Mimic pyzbar format
+        else:
+            return []
+            
+    except Exception as e:
+        st.error(f"QR code decoding error: {e}")
+        return []
 
 # ==================== UTILITY FUNCTIONS ====================
 
@@ -71,10 +185,8 @@ def get_translator(source='auto', target='en', max_retries=3):
                     f"Could not connect to translation service after {max_retries} attempts. Proceeding without translation.")
                 return None
 
-
 # Initialize translator
 translator = get_translator(source='auto', target='en')
-
 
 def safe_translate(text, source_lang, target_lang, max_retries=2):
     """Safely translates text with retries and returns original text if translation fails."""
@@ -101,7 +213,6 @@ def safe_translate(text, source_lang, target_lang, max_retries=2):
 
     return text, False
 
-
 # ==================== DOCUMENT PROCESSING FUNCTIONS ====================
 
 def download_pdf_from_url(url):
@@ -121,7 +232,6 @@ def download_pdf_from_url(url):
         st.error(f"An error occurred while downloading the PDF: {e}")
         return None
 
-
 def process_pdf(pdf_file):
     """Process a PDF file and return a list of documents."""
     try:
@@ -140,7 +250,6 @@ def process_pdf(pdf_file):
         st.error(f"Failed to process the PDF: {e}")
         return None
 
-
 def process_csv(csv_file):
     """Process a CSV file and return a list of documents."""
     try:
@@ -154,26 +263,41 @@ def process_csv(csv_file):
         st.error(f"Failed to process the CSV file: {e}")
         return None
 
-
 def setup_rag_chain(documents):
     """Set up the RAG (Retrieval-Augmented Generation) chain."""
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=200)
     chunks = text_splitter.split_documents(documents)
 
-    GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+    # Get GROQ API key from secrets or environment variable
+    try:
+        GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+    except KeyError:
+        # Try environment variable as fallback
+        GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+        if not GROQ_API_KEY:
+            st.error("GROQ_API_KEY not found. Please set it in secrets.toml or environment variables.")
+            return None
 
-    embeddings = HuggingFaceEmbeddings(
-        model_name="all-MiniLM-L6-v2",
-        model_kwargs={'device': 'cpu'},
-        encode_kwargs={'normalize_embeddings': True}
-    )
-
-    vector_db = Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        collection_name="huggingface-groq-rag",
-        persist_directory="./chroma_db"
-    )
+    # Use a simple TF-IDF based approach instead of embeddings
+    st.warning("Using simple text-based retrieval (install compatible packages for better embeddings)")
+    
+    # Simple in-memory storage for documents with basic search
+    st.session_state.documents = chunks
+    
+    def simple_retriever(query):
+        """Basic keyword-based document retrieval"""
+        query_words = query.lower().split()
+        scored_docs = []
+        
+        for doc in chunks:
+            content = doc.page_content.lower()
+            score = sum(1 for word in query_words if word in content)
+            if score > 0:
+                scored_docs.append((doc, score))
+        
+        # Sort by relevance score and return top 3
+        scored_docs.sort(key=lambda x: x[1], reverse=True)
+        return [doc for doc, score in scored_docs[:3]]
 
     llm = ChatGroq(
         temperature=0,
@@ -181,34 +305,25 @@ def setup_rag_chain(documents):
         groq_api_key=GROQ_API_KEY
     )
 
-    QUERY_PROMPT = PromptTemplate(
-        input_variables=["question"],
-        template="""You are an AI assistant generating alternative query perspectives.
-        Generate 5 different versions of the given question to improve document retrieval:
-        Original question: {question}"""
-    )
-
-    retriever = MultiQueryRetriever.from_llm(
-        vector_db.as_retriever(),
-        llm,
-        prompt=QUERY_PROMPT
-    )
-
-    template = """Answer the question based ONLY on the following context:
+    template = """Answer the question based on the following context:
     {context}
+    
     Question: {question}
-    """
+    
+    If the context doesn't contain relevant information, say "I don't have enough information to answer this question based on the provided documents."
+    
+    Answer:"""
+    
     prompt = ChatPromptTemplate.from_template(template)
 
     chain = (
-            {"context": retriever, "question": RunnablePassthrough()}
-            | prompt
-            | llm
-            | StrOutputParser()
+        {"context": lambda x: "\n\n".join([doc.page_content for doc in simple_retriever(x["question"])]), 
+         "question": lambda x: x["question"]}
+        | prompt
+        | llm
+        | StrOutputParser()
     )
     return chain
-
-
 # ==================== AUDIO PROCESSING FUNCTIONS ====================
 
 def record_audio(filename="voice_input.wav", record_seconds=5, sample_rate=44100, chunk=1024):
@@ -242,7 +357,6 @@ def record_audio(filename="voice_input.wav", record_seconds=5, sample_rate=44100
 
     return filename
 
-
 def transcribe_audio(filename, lang="en"):
     """Converts speech from the audio file to text in the selected language."""
     recognizer = sr.Recognizer()
@@ -255,7 +369,6 @@ def transcribe_audio(filename, lang="en"):
         except sr.RequestError as e:
             st.error(f"Could not request results; {e}")
     return None
-
 
 def text_to_speech(text, lang_code="en", max_retries=2):
     """Converts text to speech in the specified language with fallback to English."""
@@ -280,7 +393,6 @@ def text_to_speech(text, lang_code="en", max_retries=2):
                 return None, False
     return None, False
 
-
 def get_tts_language_code(language):
     """Maps the selected language to its code for text-to-speech."""
     language_codes = {
@@ -291,7 +403,6 @@ def get_tts_language_code(language):
         "Tamil": "ta"
     }
     return language_codes.get(language, "en")
-
 
 # ==================== INDOOR NAVIGATION CLASSES ====================
 
@@ -321,7 +432,7 @@ class IndoorMap:
         """Calculate Euclidean distance between two locations"""
         if loc1 in self.locations and loc2 in self.locations:
             x1, y1 = self.locations[loc1]['x'], self.locations[loc1]['y']
-            x2, y2 = self.locations[loc2]['x'], self.locations[loc2]['y']
+            x2, y2 = self.locations[loc2]['x'], self.locations[loc2]['y']  
             return math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
         return float('inf')
 
@@ -475,7 +586,6 @@ class IndoorMap:
 
         return img
 
-
 # ==================== NAVIGATION SETUP FUNCTIONS ====================
 
 def get_user_location():
@@ -501,7 +611,6 @@ def get_user_location():
     }
 
     return location_data
-
 
 def create_dynamic_store_map(store_df):
     """Create a dynamic store map based on CSV data"""
@@ -597,7 +706,6 @@ def create_dynamic_store_map(store_df):
 
     return mall_map
 
-
 def create_sample_mall_map():
     """Create a sample shopping mall map"""
     mall_map = IndoorMap(800, 600)
@@ -641,7 +749,6 @@ def create_sample_mall_map():
     }
 
     return mall_map
-
 
 def setup_navigation_chain():
     """Set up the navigation-specific LLM chain"""
@@ -689,8 +796,16 @@ Response:"""
 
     return chain
 
-
 # ==================== UI RENDERING BASED ON FEATURE MODE ====================
+
+# Sidebar for main feature selection
+feature_mode = st.sidebar.selectbox(
+    "Select Feature:",
+    ["Document Analysis", "Indoor Navigation", "Both Features"]
+)
+
+# Language selection (applies to both features)
+language = st.radio("Select Language:", ("English", "Hindi", "Odia", "Bengali", "Tamil"))
 
 if feature_mode in ["Document Analysis", "Both Features"]:
     st.header("Document Analysis")
@@ -706,12 +821,12 @@ if feature_mode in ["Document Analysis", "Both Features"]:
         uploaded_qr = st.file_uploader("Upload a QR code image", type=["png", "jpg", "jpeg"])
         if uploaded_qr:
             image = Image.open(uploaded_qr)
-            decoded_objects = decode(image)
+            decoded_objects = decode_qr_code(image)  # Use our new OpenCV function
     elif qr_option == "Scan QR from Camera":
         camera_image = st.camera_input("Scan QR Code")
         if camera_image:
             image = Image.open(camera_image)
-            decoded_objects = decode(image)
+            decoded_objects = decode_qr_code(image)  # Use our new OpenCV function
 
     # Decode QR code and process PDF
     if 'decoded_objects' in locals() and decoded_objects:
@@ -856,7 +971,7 @@ if feature_mode in ["Indoor Navigation", "Both Features"]:
                         with col2:
                             st.write(f"₹{product['price']}")
                         with col3:
-                            if st.button(f"Go", key=f"goto_{product['name']}"):
+                            if st.button(f"Go", key=f"goto_{product['name']}_{location}"):
                                 if st.session_state.current_location and location in st.session_state.indoor_map.locations:
                                     path = st.session_state.indoor_map.find_path(st.session_state.current_location,
                                                                                  location)
@@ -1113,7 +1228,8 @@ else:
             # Invoke the appropriate chain based on query type
             with st.spinner("Generating answer..."):
                 if query_type == "Document Analysis":
-                    result = st.session_state.chain.invoke(translated_query)
+                    result = st.session_state.chain.invoke({"question": translated_query})
+
                 else:  # Indoor Navigation
                     locations_info = {name: info['description'] for name, info in
                                       st.session_state.indoor_map.locations.items()}
