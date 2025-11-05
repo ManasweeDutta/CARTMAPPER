@@ -1155,7 +1155,7 @@ if feature_mode in ["Indoor Navigation", "Both Features"]:
             .showcase-carousel-container {
                 display: flex;
                 gap: 1.3rem;
-                animation: showcaseScroll 70s linear infinite;
+                animation: showcaseScroll 150s linear infinite;
                 width: max-content;
             }
 
@@ -1166,14 +1166,15 @@ if feature_mode in ["Indoor Navigation", "Both Features"]:
 
             /* 🩰 Soft pastel product cards */
             .showcase-card {
-                flex: 0 0 240px;
+                flex: 0 0 260px;
                 background: linear-gradient(180deg, #ffffff, #fff8fb);
                 border-radius: 18px;
                 border: 1px solid rgba(255,182,193,0.25);
                 box-shadow: 0 6px 14px rgba(255,150,170,0.12);
                 padding: 1rem;
                 text-align: center;
-                transition: transform 0.55s ease, box-shadow 0.55s ease;
+                transition: transform 0.45s ease, box-shadow 0.45s ease;
+
             }
 
             .showcase-card:hover {
@@ -1233,8 +1234,8 @@ if feature_mode in ["Indoor Navigation", "Both Features"]:
                 import streamlit.components.v1 as components
 
                 components.html(
-                    f"<div style='padding:10px;background-color:#0e1117;'>{carousel_html}</div>",
-                    height=450, scrolling=True
+                    f"<div style='padding:10px;background:linear-gradient(135deg, #fff9fb 0%, #fffefc 100%); border-radius:20px; box-shadow:0 4px 12px rgba(255,182,193,0.25);'>{carousel_html}</div>",
+                    height=480, scrolling=False
                 )
 
         # ==================== PRODUCT CAROUSEL (Offline Mode) ====================
