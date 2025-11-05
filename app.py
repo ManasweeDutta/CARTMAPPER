@@ -124,11 +124,167 @@ def handle_oauth_callback():
 
 st.set_page_config(page_title="CartMapper", layout="wide", page_icon="🛒")
 
+# ==================== THEME & AESTHETIC STYLING ====================
+
+st.markdown("""
+<style>
+
+:root {
+  --primary-color: #ff6f61;  /* Coral pink */
+  --accent-color: #ffd6a5;   /* Soft peach */
+  --bg-gradient: linear-gradient(135deg, #f9f7f7 0%, #fff5f7 100%);
+  --text-dark: #2f2f2f;
+  --text-light: #6c757d;
+  --card-bg: #ffffff;
+  --border-radius: 18px;
+  --shadow: 0 4px 14px rgba(0,0,0,0.08);
+}
+
+/* Background and typography */
+html, body, [class*="css"]  {
+  font-family: 'Poppins', sans-serif;
+  background: var(--bg-gradient);
+  color: var(--text-dark);
+}
+
+/* Title styling */
+h1, h2, h3 {
+  font-family: 'Playfair Display', serif;
+  color: #222;
+  text-shadow: 0 1px 0 rgba(0,0,0,0.05);
+}
+
+/* Streamlit sidebar */
+[data-testid="stSidebar"] {
+  background: linear-gradient(180deg, #fff5f7 0%, #fceef3 100%);
+  color: #333;
+  box-shadow: var(--shadow);
+  border-radius: 0 20px 20px 0;
+}
+[data-testid="stSidebar"] h3, [data-testid="stSidebar"] h2 {
+  color: #ff6f61;
+}
+
+/* Buttons */
+div.stButton > button {
+  background: var(--primary-color);
+  color: white;
+  font-weight: 600;
+  border: none;
+  border-radius: 12px;
+  padding: 0.6em 1.2em;
+  box-shadow: var(--shadow);
+  transition: all 0.25s ease-in-out;
+}
+div.stButton > button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(255,111,97,0.3);
+  background: #ff826d;
+}
+
+/* Input fields and select boxes */
+input, select, textarea, [data-baseweb="input"] {
+  border-radius: 10px !important;
+  border: 1px solid #ddd !important;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
+  padding: 0.5em !important;
+}
+[data-testid="stTextInput"] label, [data-testid="stSelectbox"] label {
+  font-weight: 600;
+  color: var(--text-light);
+}
+
+/* Cards (like product, info, etc.) */
+.stMarkdown, .stDataFrame, [data-testid="stVerticalBlock"] {
+  border-radius: var(--border-radius);
+  background: var(--card-bg);
+  box-shadow: var(--shadow);
+  padding: 1em;
+  margin-top: 1em;
+}
+
+/* Expander styling */
+details {
+  background: #fffafc;
+  border-radius: 15px;
+  box-shadow: var(--shadow);
+  border: none;
+  padding: 0.5em 1em;
+}
+summary {
+  font-weight: 600;
+  color: var(--primary-color);
+  font-size: 1.05rem;
+}
+
+/* Metric cards */
+[data-testid="stMetricValue"] {
+  color: var(--primary-color);
+  font-weight: 700;
+}
+[data-testid="stMetricLabel"] {
+  color: #555;
+}
+
+/* Product carousel container aesthetic */
+.carousel-container {
+  background: #fffafc;
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: var(--shadow);
+}
+.product-card {
+  background: white;
+  border-radius: 15px;
+  box-shadow: 0 4px 10px rgba(255,182,193,0.2);
+  transition: all 0.3s ease;
+}
+.product-card:hover {
+  transform: scale(1.05);
+  box-shadow: 0 8px 20px rgba(255,182,193,0.4);
+}
+
+/* Tabs and expanders */
+[data-baseweb="tab"] {
+  border-radius: 12px;
+  background: #ffeef0;
+  font-weight: 600;
+  color: #333;
+}
+
+/* Footer / tips */
+footer, .css-164nlkn {
+  visibility: hidden;
+}
+
+</style>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600&family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+""", unsafe_allow_html=True)
+
+
 # Handle OAuth first
 handle_oauth_callback()
 check_auth()
 
 st.title("🛒 CartMapper - Document Analysis & Indoor Navigation")
+
+st.markdown("""
+<div style='
+    background: linear-gradient(135deg, #ffd6a5, #ffcad4);
+    border-radius: 20px;
+    padding: 1.5rem;
+    text-align: center;
+    color: #333;
+    font-family: "Playfair Display", serif;
+    font-size: 1.3rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.08);
+'>
+✨ Welcome to <b>CartMapper</b> — Smart Shopping Meets AI.  
+Explore, analyze, and navigate your world beautifully.
+</div>
+""", unsafe_allow_html=True)
+
 
 # Sidebar user info
 with st.sidebar:
@@ -743,7 +899,7 @@ def create_dynamic_store_map(store_df):
     # 🏷️ Create product entries
     for i, row in store_df.iterrows():
         product = {
-            "name": str(row.get(name_col, f"Product {i+1}")),
+            "name": str(row.get(name_col, f"Product {i + 1}")),
             "category": str(row.get(category_col, "General")) if category_col else "General",
             "price": parse_price(row.get(price_col)) if price_col else "N/A",
             "type": str(row.get(type_col, "Unknown")) if type_col else "Unknown"
@@ -755,6 +911,7 @@ def create_dynamic_store_map(store_df):
         mall_map.products.setdefault(section_name, []).append(product)
 
     return mall_map
+
 
 # ==================== DEFAULT SAMPLE MALL MAP (used if no CSV uploaded) ====================
 
@@ -842,8 +999,6 @@ Response:"""
     prompt = ChatPromptTemplate.from_template(navigation_template)
     chain = (prompt | llm | StrOutputParser())
     return chain
-
-
 
 
 # ==================== FEATURE: DOCUMENTS ====================
@@ -983,64 +1138,93 @@ if feature_mode in ["Indoor Navigation", "Both Features"]:
             html_parts = []
             html_parts.append("""
             <style>
-                .carousel-container {
-                    display: flex;
-                    overflow-x: auto;
-                    gap: 1rem;
-                    padding: 1rem 0;
-                    scroll-behavior: smooth;
-                }
-                .carousel-container::-webkit-scrollbar { height: 8px; }
-                .carousel-container::-webkit-scrollbar-thumb {
-                    background: #bbb;
-                    border-radius: 10px;
-                }
-                .carousel-container::-webkit-scrollbar-thumb:hover { background: #999; }
-                .product-card {
-                    flex: 0 0 250px;
-                    background: linear-gradient(180deg, #f8f9fa, #eef1f3);
-                    border-radius: 15px;
-                    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-                    padding: 1rem;
-                    transition: transform 0.3s, box-shadow 0.3s;
-                    border: 1px solid #e0e0e0;
-                }
-                .product-card:hover {
-                    transform: translateY(-6px);
-                    box-shadow: 0 8px 18px rgba(0,0,0,0.15);
-                    background: linear-gradient(180deg, #ffffff, #f3f3f3);
-                }
-                .product-title { font-weight: 600; font-size: 1.1rem; margin-bottom: 0.25rem; color: #222; }
-                .product-category { font-size: 0.9rem; color: #777; margin-bottom: 0.4rem; }
-                .product-price { font-weight: 700; color: #2e7d32; margin-bottom: 0.3rem; }
-                .product-type {
-                    font-size: 0.8rem; color: #333; background: #f0f0f0;
-                    padding: 2px 8px; border-radius: 6px; display: inline-block;
-                    margin-bottom: 0.4rem;
-                }
-                .product-section {
-                    font-size: 0.75rem; color: #555; background: #e8f0fe;
-                    border-radius: 6px; padding: 2px 6px; display: inline-block;
-                }
+            /* ==================== PASTEL PRODUCT SHOWCASE ==================== */
+
+            .showcase-wrapper {
+                overflow: hidden;
+                width: 100%;
+                position: relative;
+                background: linear-gradient(135deg, #fff9fb 0%, #fffefc 100%);
+                border-radius: 22px;
+                box-shadow: 0 6px 16px rgba(0,0,0,0.05);
+                padding: 1.5rem 0;
+                border: none;
+            }
+
+            /* 🌸 Smooth, slow scroll */
+            .showcase-carousel-container {
+                display: flex;
+                gap: 1.3rem;
+                animation: showcaseScroll 70s linear infinite;
+                width: max-content;
+            }
+
+            @keyframes showcaseScroll {
+                0% { transform: translateX(0); }
+                100% { transform: translateX(-50%); }
+            }
+
+            /* 🩰 Soft pastel product cards */
+            .showcase-card {
+                flex: 0 0 240px;
+                background: linear-gradient(180deg, #ffffff, #fff8fb);
+                border-radius: 18px;
+                border: 1px solid rgba(255,182,193,0.25);
+                box-shadow: 0 6px 14px rgba(255,150,170,0.12);
+                padding: 1rem;
+                text-align: center;
+                transition: transform 0.55s ease, box-shadow 0.55s ease;
+            }
+
+            .showcase-card:hover {
+                transform: translateY(-6px) scale(1.02);
+                box-shadow: 0 10px 24px rgba(255,160,180,0.25);
+                border-color: rgba(255,150,170,0.4);
+                background: linear-gradient(180deg, #fff, #fff3f6);
+            }
+
+            .showcase-title { font-weight: 600; font-size: 1.05rem; color: #222; margin-bottom: 0.25rem; }
+            .showcase-category { font-size: 0.9rem; color: #777; margin-bottom: 0.4rem; }
+            .showcase-price { font-weight: 700; color: #2e7d32; margin-bottom: 0.3rem; }
+            .showcase-type {
+                font-size: 0.8rem; color: #333; background: #f7f7f7;
+                padding: 3px 8px; border-radius: 6px; display: inline-block; margin-bottom: 0.4rem;
+            }
+            .showcase-section {
+                font-size: 0.75rem; color: #444; background: #eef6ff;
+                border-radius: 6px; padding: 3px 6px; display: inline-block;
+            }
+
+            /* Pause animation on hover */
+            .showcase-wrapper:hover .showcase-carousel-container { animation-play-state: paused; }
+
+            /* Hide scrollbar */
+            .showcase-carousel-container::-webkit-scrollbar { display: none; }
+
             </style>
-            <div class="carousel-container">
+
+            <div class="showcase-wrapper">
+                <div class="showcase-carousel-container">
             """)
 
             for p in filtered_products:
-                price_display = p["price"]
-                if isinstance(price_display, (int, float)):
-                    price_display = f"₹{price_display:.2f}"
-                html_parts.append(f"""
-                <div class="product-card">
-                    <div class="product-title">{p['name']}</div>
-                    <div class="product-category">{p['category']}</div>
-                    <div class="product-price">{price_display}</div>
-                    <div class="product-type">{p['type']}</div>
-                    <div class="product-section">📍 {p['section']}</div>
-                </div>
-                """)
+                # 🔁 Duplicate for seamless scrolling
+                for p in filtered_products:
+                    price_display = p["price"]
+                    if isinstance(price_display, (int, float)):
+                        price_display = f"₹{price_display:.2f}"
+                    html_parts.append(f"""
+                    <<div class="showcase-card">
+    <div class="showcase-title">{p['name']}</div>
+    <div class="showcase-category">{p['category']}</div>
+    <div class="showcase-price">{p['price'] if isinstance(p['price'], str) else f"₹{p['price']:.2f}"}</div>
+    <div class="showcase-type">{p['type']}</div>
+    <div class="showcase-section">📍 {p['section']}</div>
+</div>
 
-            html_parts.append("</div>")
+                    """)
+
+            html_parts.append("</div></div>")
             carousel_html = "\n".join(html_parts)
 
             if not filtered_products:
@@ -1151,8 +1335,8 @@ if feature_mode in ["Indoor Navigation", "Both Features"]:
                     0% {{ transform: translateX(0); }}
                     100% {{ transform: translateX(-50%); }}
                 }}
-                
-                
+
+
                 </style>
                 """
                 st.components.v1.html(carousel_html, height=280, scrolling=False)
