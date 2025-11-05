@@ -704,8 +704,16 @@ def create_dynamic_store_map(store_df):
     mall_map = IndoorMap(800, 600)
     mall_map.add_location("Entrance", 400, 550, "Main entrance to the store")
 
-    if 'Category' in store_df.columns:
-        categories = store_df['Category'].unique()
+    # 🔍 Automatically detect column names (works for "Price (INR)")
+    name_col = next((c for c in store_df.columns if "name" in c.lower() or "product" in c.lower()), None)
+    category_col = next((c for c in store_df.columns if "category" in c.lower()), None)
+    price_col = next((c for c in store_df.columns if "price" in c.lower()), None)
+    type_col = next((c for c in store_df.columns if "veg" in c.lower() or "type" in c.lower()), None)
+    stock_col = next((c for c in store_df.columns if "stock" in c.lower() or "qty" in c.lower()), None)
+
+    # 🗺️ Create store layout dynamically by categories
+    if category_col:
+        categories = store_df[category_col].fillna("General").unique()
         positions = [
             (150, 150), (650, 150), (150, 300), (650, 300),
             (150, 450), (650, 450), (400, 200), (400, 350)
@@ -715,60 +723,40 @@ def create_dynamic_store_map(store_df):
                 x, y = positions[i]
                 mall_map.add_location(f"{category} Section", x, y, f"Section for {category} products")
     else:
-        default_sections = [
-            ("Grocery Section", 200, 200, "Fresh groceries and daily needs"),
-            ("Dairy Section", 600, 200, "Milk, cheese, and dairy products"),
-            ("Meat Section", 200, 400, "Fresh meat and poultry"),
-            ("Vegetables Section", 600, 400, "Fresh vegetables and fruits"),
-            ("Bakery Section", 400, 300, "Fresh bread and baked goods")
-        ]
-        for name, x, y, desc in default_sections:
-            mall_map.add_location(name, x, y, desc)
+        mall_map.add_location("General Section", 400, 300, "General products area")
 
-    mall_map.add_location("Customer Service", 100, 100, "Help and information desk")
-    mall_map.add_location("Checkout", 400, 500, "Billing and payment counter")
+    mall_map.add_location("Checkout", 400, 500, "Billing counter")
     mall_map.add_location("Exit", 400, 50, "Store exit")
-
-    mall_map.add_obstacle(350, 250, 450, 350)
-    mall_map.add_obstacle(0, 0, 800, 30)
-    mall_map.add_obstacle(0, 0, 30, 600)
-    mall_map.add_obstacle(770, 0, 800, 600)
-    mall_map.add_obstacle(0, 570, 800, 600)
 
     mall_map.products = {}
 
-    if 'Category' in store_df.columns:
-        for category in store_df['Category'].unique():
-            category_products = store_df[store_df['Category'] == category]
-            section_name = f"{category} Section"
-            if section_name in mall_map.locations:
-                mall_map.products[section_name] = []
-                for _, row in category_products.iterrows():
-                    product = {
-                        'name': row.get('Product Name', row.get('Name', 'Unknown Product')),
-                        'category': category,
-                        'price': row.get('Price', row.get('Price (Rs)', 0)),
-                        'type': row.get('Veg/Non-Veg', 'Unknown')
-                    }
-                    mall_map.products[section_name].append(product)
-    else:
-        sections = list(mall_map.locations.keys())
-        product_sections = [s for s in sections if 'Section' in s]
-        for section in product_sections:
-            mall_map.products[section] = []
-        for i, (_, row) in enumerate(store_df.iterrows()):
-            if product_sections:
-                section_idx = i % len(product_sections)
-                section_name = product_sections[section_idx]
-                product = {
-                    'name': row.get('Product Name', row.get('Name', f'Product {i + 1}')),
-                    'category': row.get('Category', 'General'),
-                    'price': row.get('Price', row.get('Price (Rs)', 0)),
-                    'type': row.get('Veg/Non-Veg', 'Unknown')
-                }
-                mall_map.products[section_name].append(product)
+    # 🧮 Helper to clean and parse price
+    def parse_price(value):
+        if pd.isna(value):
+            return "N/A"
+        try:
+            s = str(value).replace(",", "").replace("₹", "").strip()
+            return float(s)
+        except Exception:
+            return "N/A"
+
+    # 🏷️ Create product entries
+    for i, row in store_df.iterrows():
+        product = {
+            "name": str(row.get(name_col, f"Product {i+1}")),
+            "category": str(row.get(category_col, "General")) if category_col else "General",
+            "price": parse_price(row.get(price_col)) if price_col else "N/A",
+            "type": str(row.get(type_col, "Unknown")) if type_col else "Unknown"
+        }
+        if stock_col:
+            product["stock"] = str(row.get(stock_col))
+
+        section_name = f"{product['category']} Section" if category_col else "General Section"
+        mall_map.products.setdefault(section_name, []).append(product)
+
     return mall_map
 
+# ==================== DEFAULT SAMPLE MALL MAP (used if no CSV uploaded) ====================
 
 def create_sample_mall_map():
     mall_map = IndoorMap(800, 600)
@@ -789,6 +777,7 @@ def create_sample_mall_map():
     mall_map.add_obstacle(750, 0, 800, 600)
     mall_map.add_obstacle(0, 550, 800, 600)
 
+    # 🛒 Sample products for default map
     mall_map.products = {
         "Grocery Store": [
             {"name": "Basmati Rice", "category": "Grains", "price": 120, "type": "Veg"},
@@ -806,8 +795,11 @@ def create_sample_mall_map():
             {"name": "Headphones", "category": "Electronics", "price": 2000, "type": "NA"},
         ]
     }
+
     return mall_map
 
+
+# ==================== SETUP NAVIGATION CHAIN ====================
 
 def setup_navigation_chain():
     try:
@@ -823,11 +815,13 @@ def setup_navigation_chain():
         model_name="llama-3.1-8b-instant",
         groq_api_key=GROQ_API_KEY
     )
+
     navigation_template = """You are an intelligent indoor navigation assistant for a modern store/supermarket. 
 Available locations: {locations}
 Current location: {current_location}
 Products available: {products_info}
 User query: {question}
+
 Instructions:
 - Provide clear, helpful navigation assistance
 - If asked for directions, give step-by-step walking instructions
@@ -837,15 +831,19 @@ Instructions:
 - Include relevant product recommendations when appropriate
 - Mention distances when helpful
 - If searching for products, list the best matches with locations
+
 Response format:
 - Use bullet points for directions
 - Include product prices when mentioned
 - Suggest alternatives if exact product not found
 - Be concise but informative
 Response:"""
+
     prompt = ChatPromptTemplate.from_template(navigation_template)
     chain = (prompt | llm | StrOutputParser())
     return chain
+
+
 
 
 # ==================== FEATURE: DOCUMENTS ====================
@@ -910,6 +908,258 @@ if feature_mode in ["Indoor Navigation", "Both Features"]:
         st.session_state.indoor_map = create_dynamic_store_map(store_df)
         add_shop_anchors_to_map(st.session_state.indoor_map, SHOP_PROFILE)
         st.session_state.navigation_chain = setup_navigation_chain()
+
+        # ==================== SAFE CSV UPLOAD HANDLING ====================
+
+        if store_csv is not None:
+            # Validate the uploaded file type
+            if not store_csv.name.lower().endswith(".csv"):
+                st.error("Please upload a valid CSV file (not PDF, TXT, or other formats).")
+                st.stop()
+
+            try:
+                # Reset the file pointer to start (important!)
+                store_csv.seek(0)
+
+                # Try to read the CSV file safely
+                store_df = pd.read_csv(store_csv)
+
+                # Validate the CSV structure
+                if store_df.empty or len(store_df.columns) == 0:
+                    st.error("⚠️ The uploaded CSV file appears empty or has no columns.")
+                    st.stop()
+
+            except pd.errors.EmptyDataError:
+                st.error("❌ The uploaded CSV file is empty or corrupted.")
+                st.stop()
+
+            except Exception as e:
+                st.error(f"❌ Could not read the uploaded CSV file: {e}")
+                st.stop()
+
+            # Continue only if everything above succeeded
+            st.session_state.indoor_map = create_dynamic_store_map(store_df)
+            add_shop_anchors_to_map(st.session_state.indoor_map, SHOP_PROFILE)
+            st.session_state.navigation_chain = setup_navigation_chain()
+
+        # ==================== PRODUCT CAROUSEL WITH FILTER ====================
+
+        # ==================== PRODUCT CAROUSEL WITH FILTER ====================
+
+        # ==================== PRODUCT CAROUSEL WITH FILTER ====================
+
+        if hasattr(st.session_state.indoor_map, "products") and st.session_state.indoor_map.products:
+            st.markdown("## 🛍️ Product Showcase")
+
+            # Combine all products across sections
+            all_products = []
+            for section, products in st.session_state.indoor_map.products.items():
+                for p in products:
+                    all_products.append({
+                        "name": p.get("name", "Unnamed"),
+                        "category": p.get("category", "General"),
+                        "price": p.get("price", "N/A"),
+                        "type": p.get("type", "Unknown"),
+                        "section": section
+                    })
+
+            # Filters
+            categories = sorted(set([p["category"] for p in all_products if p.get("category")]))
+            types = sorted(set([p["type"] for p in all_products if p.get("type")]))
+            col1, col2 = st.columns(2)
+            with col1:
+                selected_category = st.selectbox("🔎 Filter by Category", ["All"] + categories, index=0)
+            with col2:
+                selected_type = st.selectbox("🥗 Filter by Type", ["All"] + types, index=0)
+
+            # Filter logic
+            filtered_products = [
+                p for p in all_products
+                if (selected_category == "All" or p["category"] == selected_category)
+                   and (selected_type == "All" or p["type"] == selected_type)
+            ]
+
+            # Build HTML carousel
+            html_parts = []
+            html_parts.append("""
+            <style>
+                .carousel-container {
+                    display: flex;
+                    overflow-x: auto;
+                    gap: 1rem;
+                    padding: 1rem 0;
+                    scroll-behavior: smooth;
+                }
+                .carousel-container::-webkit-scrollbar { height: 8px; }
+                .carousel-container::-webkit-scrollbar-thumb {
+                    background: #bbb;
+                    border-radius: 10px;
+                }
+                .carousel-container::-webkit-scrollbar-thumb:hover { background: #999; }
+                .product-card {
+                    flex: 0 0 250px;
+                    background: linear-gradient(180deg, #f8f9fa, #eef1f3);
+                    border-radius: 15px;
+                    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+                    padding: 1rem;
+                    transition: transform 0.3s, box-shadow 0.3s;
+                    border: 1px solid #e0e0e0;
+                }
+                .product-card:hover {
+                    transform: translateY(-6px);
+                    box-shadow: 0 8px 18px rgba(0,0,0,0.15);
+                    background: linear-gradient(180deg, #ffffff, #f3f3f3);
+                }
+                .product-title { font-weight: 600; font-size: 1.1rem; margin-bottom: 0.25rem; color: #222; }
+                .product-category { font-size: 0.9rem; color: #777; margin-bottom: 0.4rem; }
+                .product-price { font-weight: 700; color: #2e7d32; margin-bottom: 0.3rem; }
+                .product-type {
+                    font-size: 0.8rem; color: #333; background: #f0f0f0;
+                    padding: 2px 8px; border-radius: 6px; display: inline-block;
+                    margin-bottom: 0.4rem;
+                }
+                .product-section {
+                    font-size: 0.75rem; color: #555; background: #e8f0fe;
+                    border-radius: 6px; padding: 2px 6px; display: inline-block;
+                }
+            </style>
+            <div class="carousel-container">
+            """)
+
+            for p in filtered_products:
+                price_display = p["price"]
+                if isinstance(price_display, (int, float)):
+                    price_display = f"₹{price_display:.2f}"
+                html_parts.append(f"""
+                <div class="product-card">
+                    <div class="product-title">{p['name']}</div>
+                    <div class="product-category">{p['category']}</div>
+                    <div class="product-price">{price_display}</div>
+                    <div class="product-type">{p['type']}</div>
+                    <div class="product-section">📍 {p['section']}</div>
+                </div>
+                """)
+
+            html_parts.append("</div>")
+            carousel_html = "\n".join(html_parts)
+
+            if not filtered_products:
+                st.warning("No products match the selected filters.")
+            else:
+                import streamlit.components.v1 as components
+
+                components.html(
+                    f"<div style='padding:10px;background-color:#0e1117;'>{carousel_html}</div>",
+                    height=450, scrolling=True
+                )
+
+        # ==================== PRODUCT CAROUSEL (Offline Mode) ====================
+        st.markdown("### 🛍️ Product Carousel Preview")
+
+        if hasattr(st.session_state.indoor_map, "products") and st.session_state.indoor_map.products:
+            all_products = []
+            for location, products in st.session_state.indoor_map.products.items():
+                for p in products:
+                    item = {
+                        "name": p.get("name", "Unnamed Product"),
+                        "category": p.get("category", "General"),
+                        "price": p.get("price", "N/A"),
+                        "type": p.get("type", "Unknown"),
+                        "location": location
+                    }
+                    all_products.append(item)
+
+            if all_products:
+                carousel_items = ""
+                for prod in all_products[:10]:  # limit to 10 for speed
+                    # Placeholder product image (no internet required)
+                    img_text = prod['name'].replace(' ', '+')
+                    img_url = f"https://via.placeholder.com/200x150.png?text={img_text}"
+
+                    carousel_items += f"""
+                    <div class="carousel-item">
+                        <img src="{img_url}" alt="{prod['name']}" />
+                        <div class="product-info">
+                            <h4>{prod['name']}</h4>
+                            <p><b>Category:</b> {prod['category']}</p>
+                            <p><b>Price:</b> ₹{prod['price']}</p>
+                            <p><b>Section:</b> {prod['location']}</p>
+                        </div>
+                    </div>
+                    """
+
+                carousel_html = f"""
+                <div class="carousel-container">
+                    <div class="carousel-track">
+                        {carousel_items}
+                    </div>
+                </div>
+
+                <style>
+                .carousel-container {{
+                    width: 100%;
+                    overflow: hidden;
+                    position: relative;
+                    background: #f9f9f9;
+                    border-radius: 15px;
+                    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+                    padding: 10px;
+                    margin-bottom: 20px;
+                }}
+                .carousel-track {{
+                    display: flex;
+                    width: max-content;
+                    animation: scroll 30s linear infinite;
+                }}
+                .carousel-item {{
+                    flex: 0 0 auto;
+                    width: 200px;
+                    margin: 0 15px;
+                    background: white;
+                    border-radius: 12px;
+                    padding: 10px;
+                    text-align: center;
+                    transition: transform 0.3s;
+                    border: 1px solid #eee;
+                }}
+                .carousel-item:hover {{
+                    transform: scale(1.05);
+                    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+                }}
+                .carousel-item img {{
+                    width: 100%;
+                    height: 150px;
+                    object-fit: cover;
+                    border-radius: 8px;
+                }}
+                .product-info {{
+                    font-size: 13px;
+                    margin-top: 8px;
+                    color: #333;
+                }}
+                .product-info h4 {{
+                    font-size: 14px;
+                    margin-bottom: 5px;
+                    color: #111;
+                }}
+                .product-card:hover {{
+                    transform: translateY(-6px);
+                    box-shadow: 0 10px 25px rgba(50, 205, 50, 0.25);
+                    background: linear-gradient(180deg, #ffffff, #f7fdf8);
+                    }}
+                @keyframes scroll {{
+                    0% {{ transform: translateX(0); }}
+                    100% {{ transform: translateX(-50%); }}
+                }}
+                
+                
+                </style>
+                """
+                st.components.v1.html(carousel_html, height=280, scrolling=False)
+            else:
+                st.info("No products found to display in the carousel yet.")
+        else:
+            st.info("Upload a store inventory CSV or scan a QR that links to a CSV to show products here.")
 
         with st.expander("Store Inventory Overview"):
             col1, col2, col3, col4 = st.columns(4)
