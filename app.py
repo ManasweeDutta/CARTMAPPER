@@ -2,6 +2,7 @@ import os
 import io
 import pathlib
 import math
+import heapq
 import random
 import time
 import json
@@ -119,6 +120,37 @@ def handle_oauth_callback():
             st.error(f"❌ Authentication failed: {e}")
             st.stop()
 
+# ==================== MULTI-STORE REGISTRY ====================
+
+STORE_REGISTRY = {
+    "Demo Supermarket": {
+        "shop_id": "shop_demo_001",
+        "profile": {
+            "store_width_cm": 3000,
+            "store_height_cm": 2000,
+            "anchors": [
+                {"anchor_id": "A1", "name": "A1 Entrance", "x": 100, "y": 1850},
+                {"anchor_id": "A2", "name": "A2 Aisle Left", "x": 500, "y": 1200},
+                {"anchor_id": "A3", "name": "A3 Aisle Right", "x": 2500, "y": 1200},
+                {"anchor_id": "A4", "name": "A4 Electronics", "x": 2200, "y": 500},
+                {"anchor_id": "A5", "name": "A5 Food Court", "x": 600, "y": 500},
+                {"anchor_id": "A6", "name": "A6 Checkout", "x": 1500, "y": 150},
+            ]
+        }
+    },
+    "Budget Store": {
+        "shop_id": "shop_budget_002",
+        "profile": {
+            "store_width_cm": 2500,
+            "store_height_cm": 1800,
+            "anchors": [
+                {"anchor_id": "B1", "name": "B1 Entrance", "x": 200, "y": 1700},
+                {"anchor_id": "B2", "name": "B2 Grocery", "x": 1200, "y": 900},
+                {"anchor_id": "B3", "name": "B3 Checkout", "x": 1200, "y": 200},
+            ]
+        }
+    }
+}
 
 # ==================== STREAMLIT APP CONFIG ====================
 
@@ -297,6 +329,10 @@ with st.sidebar:
         st.rerun()
 
 # ==================== SESSION STATE ====================
+# ==================== MULTI-STORE STATE ====================
+
+if "active_store" not in st.session_state:
+    st.session_state.active_store = "Demo Supermarket"  # default
 
 if "chain" not in st.session_state:
     st.session_state.chain = None
@@ -308,6 +344,13 @@ if "current_location" not in st.session_state:
     st.session_state.current_location = None
 if "destinations" not in st.session_state:
     st.session_state.destinations = {}
+if "cart" not in st.session_state:
+    st.session_state.cart = []
+if "current_path" not in st.session_state:
+    st.session_state.current_path = None
+
+if "budget" not in st.session_state:
+    st.session_state.budget = None
 
 # ==================== FEATURE SELECTION ====================
 
@@ -315,6 +358,25 @@ feature_mode = st.sidebar.selectbox(
     "Select Feature:",
     ["Document Analysis", "Indoor Navigation", "Both Features"]
 )
+
+# ==================== STORE SELECTION ====================
+
+st.sidebar.markdown("## 🏬 Store Selection")
+
+selected_store = st.sidebar.selectbox(
+    "Choose Store",
+    list(STORE_REGISTRY.keys()),
+    index=list(STORE_REGISTRY.keys()).index(st.session_state.active_store)
+)
+
+# Handle store change
+if selected_store != st.session_state.active_store:
+    st.session_state.active_store = selected_store
+    st.session_state.indoor_map = None
+    st.session_state.current_location = None
+    st.session_state.current_path = None
+    st.session_state.cart = []
+
 
 language = st.radio("Select Language:", ("English", "Hindi", "Odia", "Bengali", "Tamil"))
 
@@ -685,6 +747,97 @@ class IndoorMap:
         ]
         return path
 
+    import heapq
+
+    def find_path_astar(self, start, end, grid_size=40):
+        """
+        A* pathfinding on a grid-based approximation of the indoor map.
+        """
+        if start not in self.locations or end not in self.locations:
+            return None
+
+        start_pos = self.locations[start]
+        end_pos = self.locations[end]
+
+        cols = self.width // grid_size
+        rows = self.height // grid_size
+
+        def to_grid(x, y):
+            return int(x // grid_size), int(y // grid_size)
+
+        def to_world(gx, gy):
+            return gx * grid_size + grid_size // 2, gy * grid_size + grid_size // 2
+
+        start_node = to_grid(start_pos["x"], start_pos["y"])
+        end_node = to_grid(end_pos["x"], end_pos["y"])
+
+        blocked = set()
+        for obs in self.obstacles:
+            x1, y1 = to_grid(obs["x1"], obs["y1"])
+            x2, y2 = to_grid(obs["x2"], obs["y2"])
+            for x in range(min(x1, x2), max(x1, x2) + 1):
+                for y in range(min(y1, y2), max(y1, y2) + 1):
+                    blocked.add((x, y))
+
+        def heuristic(a, b):
+            return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+        open_set = []
+        heapq.heappush(open_set, (0, start_node))
+        came_from = {}
+        g_score = {start_node: 0}
+
+        directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+
+        while open_set:
+            _, current = heapq.heappop(open_set)
+
+            if current == end_node:
+                path = []
+
+                # include end node
+                wx, wy = to_world(*current)
+                path.append({"x": wx, "y": wy})
+
+                # backtrack fully
+                while current in came_from:
+                    current = came_from[current]
+                    wx, wy = to_world(*current)
+                    path.append({"x": wx, "y": wy})
+
+                path.reverse()
+
+                # snap exact start & end positions
+                path[0] = {
+                    "x": start_pos["x"],
+                    "y": start_pos["y"],
+                    "location": start
+                }
+                path[-1] = {
+                    "x": end_pos["x"],
+                    "y": end_pos["y"],
+                    "location": end
+                }
+
+                return path
+
+            for dx, dy in directions:
+                neighbor = (current[0] + dx, current[1] + dy)
+
+                if not (0 <= neighbor[0] < cols and 0 <= neighbor[1] < rows):
+                    continue
+                if neighbor in blocked:
+                    continue
+
+                tentative_g = g_score[current] + 1
+                if tentative_g < g_score.get(neighbor, float("inf")):
+                    came_from[neighbor] = current
+                    g_score[neighbor] = tentative_g
+                    f_score = tentative_g + heuristic(neighbor, end_node)
+                    heapq.heappush(open_set, (f_score, neighbor))
+
+        return None
+
     def find_product_location(self, product_name):
         product_name_lower = product_name.lower()
         for location, products in self.products.items():
@@ -748,10 +901,30 @@ class IndoorMap:
         img = Image.new('RGB', (self.width, self.height), color='white')
         draw = ImageDraw.Draw(img)
 
+        # Draw obstacles first
         for obstacle in self.obstacles:
             draw.rectangle([obstacle['x1'], obstacle['y1'], obstacle['x2'], obstacle['y2']],
                            fill='gray', outline='black')
 
+        # Draw path BEFORE locations so dots appear on top
+        if path and len(path) > 1:
+            # Draw the path with a thicker, more visible line
+            for i in range(len(path) - 1):
+                draw.line(
+                    [path[i]['x'], path[i]['y'], path[i + 1]['x'], path[i + 1]['y']],
+                    fill='#FF4444',  # Bright red
+                    width=5  # Thicker line
+                )
+
+            # Draw path waypoints as small circles
+            for point in path[1:-1]:  # Skip start and end
+                draw.ellipse(
+                    [point['x'] - 5, point['y'] - 5, point['x'] + 5, point['y'] + 5],
+                    fill='orange',
+                    outline='darkorange'
+                )
+
+        # Draw locations on top of path
         for name, loc in self.locations.items():
             color = 'blue'
             if name == current_location:
@@ -761,19 +934,14 @@ class IndoorMap:
             radius = 15
             draw.ellipse([loc['x'] - radius, loc['y'] - radius,
                           loc['x'] + radius, loc['y'] + radius],
-                         fill=color, outline='black')
+                         fill=color, outline='black', width=2)
             try:
                 font = ImageFont.truetype("arial.ttf", 12)
             except:
                 font = ImageFont.load_default()
             draw.text((loc['x'] + 20, loc['y']), name, fill='black', font=font)
 
-        if path and len(path) > 1:
-            for i in range(len(path) - 1):
-                draw.line([path[i]['x'], path[i]['y'], path[i + 1]['x'], path[i + 1]['y']],
-                          fill='red', width=3)
         return img
-
 
 # ==================== LOCATION DETECTION ====================
 
@@ -837,7 +1005,8 @@ def parse_qr_anchor_payload(qr_text):
         payload = json.loads(qr_text)
         if payload.get("type") != "anchor":
             return None, "This QR is not an anchor marker."
-        if payload.get("shop_id") != SHOP_PROFILE["shop_id"]:
+        if payload.get("shop_id") != STORE_REGISTRY[st.session_state.active_store]["shop_id"]:
+
             return None, f"This marker belongs to shop {payload.get('shop_id')}. Switch shop?"
         for k in ["anchor_id", "name", "x", "y"]:
             if k not in payload:
@@ -852,6 +1021,40 @@ def make_qr_png_bytes(text: str) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+# ==================== MULTI-STORE REGISTRY ====================
+
+STORE_REGISTRY = {
+    "Demo Supermarket": {
+        "shop_id": "shop_demo_001",
+        "csv": None,  # uploaded dynamically
+        "profile": {
+            "store_width_cm": 3000,
+            "store_height_cm": 2000,
+            "anchors": [
+                {"anchor_id": "A1", "name": "A1 Entrance", "x": 100, "y": 1850},
+                {"anchor_id": "A2", "name": "A2 Aisle Left", "x": 500, "y": 1200},
+                {"anchor_id": "A3", "name": "A3 Aisle Right", "x": 2500, "y": 1200},
+                {"anchor_id": "A4", "name": "A4 Electronics", "x": 2200, "y": 500},
+                {"anchor_id": "A5", "name": "A5 Food Court", "x": 600, "y": 500},
+                {"anchor_id": "A6", "name": "A6 Checkout", "x": 1500, "y": 150},
+            ]
+        }
+    },
+    "Budget Store": {
+        "shop_id": "shop_budget_002",
+        "csv": None,
+        "profile": {
+            "store_width_cm": 2500,
+            "store_height_cm": 1800,
+            "anchors": [
+                {"anchor_id": "B1", "name": "B1 Entrance", "x": 200, "y": 1700},
+                {"anchor_id": "B2", "name": "B2 Grocery", "x": 1200, "y": 900},
+                {"anchor_id": "B3", "name": "B3 Checkout", "x": 1200, "y": 200},
+            ]
+        }
+    }
+}
 
 
 # ==================== MAP CREATION ====================
@@ -1056,12 +1259,31 @@ if feature_mode in ["Document Analysis", "Both Features"]:
 if feature_mode in ["Indoor Navigation", "Both Features"]:
     st.header("Indoor Navigation & Product Finder")
 
-    store_csv = st.file_uploader("Upload Store Inventory (CSV)", type=["csv"], key="store_csv")
+    store_csv = st.file_uploader(
+        f"Upload Inventory for {selected_store}",
+        type=["csv"],
+        key=f"store_csv_{selected_store}"
+    )
 
     if store_csv is not None:
         store_df = pd.read_csv(store_csv)
+
+        # ✅ STORE INVENTORY PER STORE (ADD HERE)
+        STORE_REGISTRY[st.session_state.active_store]["csv"] = store_df
+
         st.session_state.indoor_map = create_dynamic_store_map(store_df)
-        add_shop_anchors_to_map(st.session_state.indoor_map, SHOP_PROFILE)
+
+        active_profile = STORE_REGISTRY[st.session_state.active_store]["profile"]
+        add_shop_anchors_to_map(
+            st.session_state.indoor_map,
+            {
+                "shop_id": STORE_REGISTRY[st.session_state.active_store]["shop_id"],
+                "store_width_cm": active_profile["store_width_cm"],
+                "store_height_cm": active_profile["store_height_cm"],
+                "anchors": active_profile["anchors"]
+            }
+        )
+
         st.session_state.navigation_chain = setup_navigation_chain()
 
         # ==================== SAFE CSV UPLOAD HANDLING ====================
@@ -1155,7 +1377,7 @@ if feature_mode in ["Indoor Navigation", "Both Features"]:
             .showcase-carousel-container {
                 display: flex;
                 gap: 1.3rem;
-                animation: showcaseScroll 150s linear infinite;
+                animation: showcaseScroll 300s linear infinite;
                 width: max-content;
             }
 
@@ -1496,27 +1718,33 @@ if feature_mode in ["Indoor Navigation", "Both Features"]:
                         with col2:
                             st.write(f"₹{product['price']}")
                         with col3:
-                            if st.button(f"Go", key=f"goto_{product['name']}"):
-                                if st.session_state.current_location and location in st.session_state.indoor_map.locations:
-                                    path = st.session_state.indoor_map.find_path(st.session_state.current_location,
-                                                                                 location)
+                            if st.button("➕ Add", key=f"add_{product['name']}"):
+                                st.session_state.cart.append({
+                                    "name": product["name"],
+                                    "price": product["price"],
+                                    "location": location,
+                                    "category": product.get("category", "General")
+                                })
+                                st.success(f"{product['name']} added to cart")
+
+                                if isinstance(product["price"], (int, float)):
+                                    cheaper = st.session_state.indoor_map.get_products_by_price_range(
+                                        0, product["price"] - 1
+                                    )
+                                    if cheaper:
+                                        alt = cheaper[0]
+                                        st.info(
+                                            f"💡 Cheaper option: {alt['product']['name']} "
+                                            f"(₹{alt['product']['price']}) at {alt['location']}"
+                                        )
+
+                            if st.button("🧭 Go", key=f"go_{product['name']}"):
+                                if st.session_state.current_location:
                                     distance = st.session_state.indoor_map.calculate_distance(
-                                        st.session_state.current_location, location)
-                                    st.info(f"Route to {location}: ~{distance:.0f} units")
-                                    nav_query = f"Give me directions from {st.session_state.current_location} to {location} to find {product['name']}"
-                                    locations_info = {name: info['description'] for name, info in
-                                                      st.session_state.indoor_map.locations.items()}
-                                    products_info = {loc: prods for loc, prods in
-                                                     st.session_state.indoor_map.products.items()} if hasattr(
-                                        st.session_state.indoor_map, 'products') else {}
-                                    response = st.session_state.navigation_chain.invoke({
-                                        "locations": str(locations_info),
-                                        "current_location": st.session_state.current_location,
-                                        "products_info": str(products_info),
-                                        "question": nav_query
-                                    })
-                                    st.write("**Directions:**")
-                                    st.write(response)
+                                        st.session_state.current_location, location
+                                    )
+                                    st.info(f"Distance: ~{distance:.0f} units")
+
                 else:
                     st.warning("Product not found in current store inventory")
 
@@ -1524,12 +1752,38 @@ if feature_mode in ["Indoor Navigation", "Both Features"]:
 
         with nav_col1:
             st.subheader("Navigation Controls")
+            st.markdown("#### 🧭 Routing Mode")
+
+            route_mode = st.radio(
+                "Choose routing algorithm:",
+                ["Standard", "Optimized (A*)"],
+                horizontal=True
+            )
+
+            st.caption(
+                "🔹 Optimized (A*) finds the shortest walkable path and avoids obstacles."
+            )
             location_names = list(st.session_state.indoor_map.locations.keys())
             destination = st.selectbox("Where would you like to go?", ["Select destination"] + location_names)
 
+            if destination != st.session_state.get("last_destination"):
+                st.session_state.current_path = None
+                st.session_state.last_destination = destination
+
             if st.session_state.current_location and destination != "Select destination":
                 if st.button("Get Directions", key="main_directions"):
-                    path = st.session_state.indoor_map.find_path(st.session_state.current_location, destination)
+                    if route_mode == "Optimized (A*)":
+                        path = st.session_state.indoor_map.find_path_astar(
+                            st.session_state.current_location,
+                            destination
+                        )
+                    else:
+                        path = st.session_state.indoor_map.find_path(
+                            st.session_state.current_location,
+                            destination
+                        )
+                    st.session_state.current_path = path
+
                     distance = st.session_state.indoor_map.calculate_distance(st.session_state.current_location,
                                                                               destination)
                     st.success(f"Route: {st.session_state.current_location} → {destination}")
@@ -1557,6 +1811,25 @@ if feature_mode in ["Indoor Navigation", "Both Features"]:
                     })
                     st.write("**Step-by-step Directions:**")
                     st.write(response)
+                    if route_mode == "Optimized (A*)":
+                        st.success("🧠 Using Optimized A* Pathfinding")
+                    else:
+                        st.info("➡️ Using Standard Routing")
+
+
+                    # ==================== CART → CHECKOUT ====================
+
+                    if st.session_state.cart and st.session_state.current_location:
+                        if st.button("🧾 Proceed to Checkout"):
+                            if "Checkout" in st.session_state.indoor_map.locations:
+                                response = st.session_state.navigation_chain.invoke({
+                                    "locations": str(st.session_state.indoor_map.locations),
+                                    "current_location": st.session_state.current_location,
+                                    "products_info": str(st.session_state.indoor_map.products),
+                                    "question": "Take me to checkout"
+                                })
+                                st.success("Navigating to Checkout")
+                                st.write(response)
 
             st.subheader("Smart Shopping List")
             shopping_items = st.text_area("Enter items (one per line):",
@@ -1595,8 +1868,10 @@ if feature_mode in ["Indoor Navigation", "Both Features"]:
             st.subheader("Store Map")
             map_image = st.session_state.indoor_map.generate_visual_map(
                 current_location=st.session_state.current_location,
-                destination=destination if destination != "Select destination" else None
+                destination=destination if destination != "Select destination" else None,
+                path=st.session_state.get("current_path")
             )
+
             st.image(map_image, caption="Store Layout - Green: You are here, Red: Destination")
             st.markdown("""
             **Map Legend:**
@@ -1781,7 +2056,68 @@ if feature_mode in ["Indoor Navigation", "Both Features"]:
         total_products = sum(len(products) for products in st.session_state.indoor_map.products.values())
         st.sidebar.metric("Products Available", total_products)
         st.sidebar.metric("Store Sections", len(st.session_state.indoor_map.locations))
+# ==================== STORE SELECTION ====================
 
+st.sidebar.markdown("## 🏬 Select Store")
+
+selected_store = st.sidebar.selectbox(
+    "Choose Store:",
+    list(STORE_REGISTRY.keys())
+)
+
+# Save active store
+if "active_store" not in st.session_state or st.session_state.active_store != selected_store:
+    st.session_state.active_store = selected_store
+    st.session_state.indoor_map = None
+    st.session_state.current_location = None
+    st.session_state.current_path = None
+    st.session_state.cart = []
+
+# ==================== SHOPPING CART & BUDGET ====================
+
+st.sidebar.markdown("### 🛒 Shopping Cart & Budget")
+
+budget_value = st.sidebar.number_input(
+    "Set Budget (₹)",
+    min_value=0,
+    step=100,
+    value=int(st.session_state.budget or 0)
+)
+
+if budget_value > 0:
+    st.session_state.budget = budget_value
+
+total_cost = sum(
+    item["price"] for item in st.session_state.cart
+    if isinstance(item["price"], (int, float))
+)
+
+st.sidebar.markdown(f"**🧾 Items:** {len(st.session_state.cart)}")
+st.sidebar.markdown(f"**💰 Total:** ₹{total_cost:.2f}")
+
+if st.session_state.budget:
+    if total_cost > st.session_state.budget:
+        st.sidebar.error("⚠️ Budget Exceeded")
+    else:
+        st.sidebar.success(f"Remaining: ₹{st.session_state.budget - total_cost:.2f}")
+
+with st.sidebar.expander("🛍️ View Cart"):
+    if not st.session_state.cart:
+        st.info("Cart is empty")
+    else:
+        for idx, item in enumerate(st.session_state.cart):
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                st.write(f"• **{item['name']}** – ₹{item['price']}")
+                st.caption(item["location"])
+            with col2:
+                if st.button("❌", key=f"remove_{idx}"):
+                    st.session_state.cart.pop(idx)
+                    st.rerun()
+
+        if st.button("🗑️ Clear Cart"):
+            st.session_state.cart.clear()
+            st.rerun()
 st.sidebar.markdown("### Features Available")
 feature_status = {
     "Document Analysis": st.session_state.chain is not None,
